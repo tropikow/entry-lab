@@ -60,20 +60,50 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Body inválido' }, { status: 400 });
   }
 
-  const { symbol = 'BTCUSDT', interval = '1d', userEntries = [] } = body;
+  const { symbol = 'BTCUSDT', userEntries = [] } = body;
   const validSymbols = ['BTCUSDT', 'ETHUSDT'];
   if (!validSymbols.includes(symbol)) {
     return NextResponse.json({ error: 'Símbolo inválido' }, { status: 400 });
   }
 
   const asset = symbol === 'BTCUSDT' ? 'Bitcoin (BTC)' : 'Ethereum (ETH)';
-  const intervalStr = intervalLabel(interval);
+  const interval = '1M'; // La IA siempre analiza en tiempo mensual
+  const periodSeconds = intervalToSeconds(interval);
 
   try {
-    const klines = await fetchKlines(symbol, interval, 90);
-    const lastPrices = klines.slice(-30).map((k) => k.close);
+    const klines = await fetchKlines(symbol, interval, 60);
     const lastCandle = klines[klines.length - 1];
-    const periodSeconds = intervalToSeconds(interval);
+    const closes = klines.map((k) => k.close);
+    const highs = klines.map((k) => k.high);
+    const lows = klines.map((k) => k.low);
+
+    function ema(data: number[], period: number): number[] {
+      const k = 2 / (period + 1);
+      const result: number[] = [];
+      let prev = data.slice(0, period).reduce((a, b) => a + b, 0) / period;
+      for (let i = 0; i < period - 1; i++) result.push(NaN);
+      result.push(prev);
+      for (let i = period; i < data.length; i++) {
+        prev = data[i] * k + prev * (1 - k);
+        result.push(prev);
+      }
+      return result;
+    }
+    const ema9 = ema(closes, 9);
+    const ema21 = ema(closes, 21);
+    const ema50 = ema(closes, 50);
+    const lastEma9 = ema9.filter((n) => !Number.isNaN(n)).pop();
+    const lastEma21 = ema21.filter((n) => !Number.isNaN(n)).pop();
+    const lastEma50 = ema50.filter((n) => !Number.isNaN(n)).pop();
+
+    const recentHigh = Math.max(...highs.slice(-12));
+    const recentLow = Math.min(...lows.slice(-12));
+    const range = recentHigh - recentLow;
+    const fib236 = recentHigh - range * 0.236;
+    const fib382 = recentHigh - range * 0.382;
+    const fib5 = recentHigh - range * 0.5;
+    const fib618 = recentHigh - range * 0.618;
+    const fib786 = recentHigh - range * 0.786;
 
     const entriesContext =
       userEntries.length > 0
@@ -94,25 +124,32 @@ ${userEntries
 Considera estos movimientos del usuario al predecir: patrones donde acertó o falló, zonas de precio frecuentes, etc.`
         : '';
 
-    const prompt = `Eres un analista técnico de criptomonedas. Analiza el siguiente historial de precios de cierre de ${asset} en gráfico ${intervalStr}.
-Últimos 30 precios de cierre (del más antiguo al más reciente): ${lastPrices.join(', ')}
-Precio actual: ${lastCandle.close}
-Rango último período: high ${lastCandle.high}, low ${lastCandle.low}
+    const prompt = `Eres un analista técnico experto en criptomonedas. SIEMPRE trabajas en tiempo MENSUAL para captar movimientos estructurales y recurrentes del mercado.
+
+## Datos de ${asset} (velas mensuales, últimos 60 meses)
+Precios de cierre (del más antiguo al más reciente): ${closes.join(', ')}
+Precio actual (último cierre): ${lastCandle.close}
+Última vela: open ${lastCandle.open}, high ${lastCandle.high}, low ${lastCandle.low}, close ${lastCandle.close}
+
+## Indicadores calculados (mensual)
+- **EMAs**: EMA(9) = ${lastEma9?.toFixed(2) ?? 'N/A'}, EMA(21) = ${lastEma21?.toFixed(2) ?? 'N/A'}, EMA(50) = ${lastEma50?.toFixed(2) ?? 'N/A'}
+- **Fibonacci (últimos 12 meses)**: Rango ${recentLow.toFixed(2)} - ${recentHigh.toFixed(2)}
+  - 23.6%: ${fib236.toFixed(2)} | 38.2%: ${fib382.toFixed(2)} | 50%: ${fib5.toFixed(2)} | 61.8%: ${fib618.toFixed(2)} | 78.6%: ${fib786.toFixed(2)}
+
+Debes considerar en tu análisis: retrocesos de Fibonacci como soporte/resistencia, cruces y distancia a EMAs (9, 21, 50), patrones recurrentes mensuales, estructura de máximos y mínimos, y el contexto de que el mercado suele repetir ciclos. Deduce el potencial del próximo movimiento mensual.
 ${entriesContext}
 
-Responde ÚNICAMENTE con un JSON válido, sin texto adicional, con esta estructura exacta:
+Responde ÚNICAMENTE con un JSON válido, sin texto adicional:
 {
-  "targetPrice": <número: precio objetivo para el próximo período>,
+  "targetPrice": <número: precio objetivo para el próximo mes>,
   "direction": "up" | "down" | "sideways",
   "confidence": "low" | "medium" | "high",
-  "reasoning": "<breve explicación en español, máximo 2 frases>",
+  "reasoning": "<explicación breve en español citando Fibonacci, EMA o patrones recurrentes>",
   "predictedValues": [<valor1>, <valor2>, <valor3>, <valor4>, <valor5>]
 }
 
-Donde predictedValues son 5 precios estimados para los próximos 5 períodos (para dibujar una línea de tendencia).
-targetPrice representa el punto más probable al que llegará el precio en el corto plazo.
-Sé conciso y fundamenta en patrones técnicos.
-${userEntries.length > 0 ? 'Incluye en tu reasoning una breve mención de cómo el historial del usuario influye en tu predicción.' : ''}`;
+predictedValues = 5 precios estimados para los próximos 5 MESES (tendencia mensual).
+targetPrice = precio más probable al que llegará en el próximo mes.`;
 
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',

@@ -208,7 +208,7 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
       const res = await fetch('/api/crypto/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol, interval, userEntries }),
+        body: JSON.stringify({ symbol, userEntries }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Error al predecir');
@@ -218,12 +218,30 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
     } finally {
       setPredictLoading(false);
     }
-  }, [symbol, interval, entries, currentPrice]);
+  }, [symbol, entries, currentPrice]);
 
   const clearPrediction = useCallback(() => {
     setPrediction(null);
     setPredictError(null);
   }, []);
+
+  const fetchPredictionRef = useRef(fetchPrediction);
+  fetchPredictionRef.current = fetchPrediction;
+
+  // Predicción automática cada 5 minutos (siempre en tiempo mensual)
+  useEffect(() => {
+    let cancelled = false;
+    const run = () => {
+      if (!cancelled) fetchPredictionRef.current();
+    };
+    const t0 = setTimeout(run, 2000);
+    const t1 = setInterval(run, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearTimeout(t0);
+      clearInterval(t1);
+    };
+  }, [symbol]);
 
   useEffect(() => {
     let cancelled = false;
@@ -407,14 +425,6 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
           >
             Añadir entrada
           </button>
-          <button
-            type="button"
-            onClick={fetchPrediction}
-            disabled={predictLoading}
-            className="rounded bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white hover:from-violet-700 hover:to-fuchsia-700 disabled:opacity-50"
-          >
-            {predictLoading ? 'Analizando…' : 'Predecir con IA'}
-          </button>
         </div>
       </div>
 
@@ -427,7 +437,10 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
       {prediction && (
         <div className="rounded-lg bg-[#131722] p-4 ring-1 ring-[#334155]">
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-sm font-medium text-[#06b6d4]">Predicción IA (GPT-4o)</p>
+            <p className="text-sm font-medium text-[#06b6d4]">
+              Predicción mensual IA (actualizada cada 5 min)
+              {predictLoading && <span className="ml-2 text-[#787b86]">Actualizando…</span>}
+            </p>
             <button
               type="button"
               onClick={clearPrediction}
