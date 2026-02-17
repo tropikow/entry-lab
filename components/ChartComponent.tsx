@@ -5,6 +5,7 @@ import {
   createChart,
   LineSeries,
   createSeriesMarkers,
+  LineStyle,
   type UTCTimestamp,
   type SeriesMarker,
 } from 'lightweight-charts';
@@ -17,9 +18,21 @@ export type Entry = {
   side: 'buy' | 'sell';
 };
 
+export type ChartInterval = '1d' | '1w' | '1M';
+
+export type Prediction = {
+  targetPrice: number;
+  direction: string;
+  confidence: string;
+  reasoning: string;
+  predictedLine: ChartPoint[];
+  currentPrice: number;
+};
+
 type Props = {
   symbol: 'BTCUSDT' | 'ETHUSDT';
   color?: string;
+  interval?: ChartInterval;
 };
 
 function findClosestTimeForPrice(data: ChartPoint[], price: number): UTCTimestamp {
@@ -36,7 +49,7 @@ function findClosestTimeForPrice(data: ChartPoint[], price: number): UTCTimestam
   return best.time;
 }
 
-export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
+export default function ChartComponent({ symbol, color = '#2962ff', interval = '1d' }: Props) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const markersPluginRef = useRef<{ setMarkers: (m: SeriesMarker<UTCTimestamp>[]) => void } | null>(null);
   const [data, setData] = useState<ChartPoint[]>([]);
@@ -45,6 +58,9 @@ export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [priceInput, setPriceInput] = useState('');
   const [sideInput, setSideInput] = useState<'buy' | 'sell'>('buy');
+  const [prediction, setPrediction] = useState<Prediction | null>(null);
+  const [predictLoading, setPredictLoading] = useState(false);
+  const [predictError, setPredictError] = useState<string | null>(null);
 
   const parsePriceInput = useCallback((raw: string): number | null => {
     const s = raw.replace(/,/g, '.').trim().toLowerCase();
@@ -69,11 +85,35 @@ export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
     setEntries((prev) => prev.filter((e) => e.id !== id));
   }, []);
 
+  const fetchPrediction = useCallback(async () => {
+    setPredictLoading(true);
+    setPredictError(null);
+    try {
+      const res = await fetch('/api/crypto/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol, interval }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Error al predecir');
+      setPrediction(json);
+    } catch (e) {
+      setPredictError(e instanceof Error ? e.message : 'Error al predecir');
+    } finally {
+      setPredictLoading(false);
+    }
+  }, [symbol, interval]);
+
+  const clearPrediction = useCallback(() => {
+    setPrediction(null);
+    setPredictError(null);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/crypto/klines?symbol=${symbol}&limit=190`)
+    fetch(`/api/crypto/klines?symbol=${symbol}&interval=${interval}&limit=190`)
       .then((res) => {
         if (!res.ok) throw new Error('Failed to load chart data');
         return res.json();
@@ -90,9 +130,9 @@ export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [symbol]);
+  }, [symbol, interval]);
 
-  // Crear chart una sola vez cuando hay datos; no destruir al cambiar entries
+  // Crear chart con datos y predicción (línea IA)
   useEffect(() => {
     if (!chartContainerRef.current || data.length === 0) return;
 
@@ -112,28 +152,60 @@ export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
     const lineSeries = chart.addSeries(LineSeries, { color });
     lineSeries.setData(data);
     markersPluginRef.current = createSeriesMarkers(lineSeries, []);
+
+    // Línea de predicción IA: conecta último punto con la trayectoria predicha
+    if (prediction?.predictedLine?.length) {
+      const lastPoint = data[data.length - 1];
+      const predictionLineData: ChartPoint[] = [
+        { time: lastPoint.time, value: lastPoint.value },
+        ...prediction.predictedLine.map((p) => ({ time: p.time as UTCTimestamp, value: p.value })),
+      ];
+      const predSeries = chart.addSeries(LineSeries, {
+        color: prediction.direction === 'up' ? '#22c55e' : prediction.direction === 'down' ? '#ef4444' : '#a78bfa',
+        lineWidth: 2,
+        lineStyle: LineStyle.Dashed,
+      });
+      predSeries.setData(predictionLineData);
+    }
+
     chart.timeScale().fitContent();
 
     return () => {
       markersPluginRef.current = null;
       chart.remove();
     };
-  }, [data, color]);
+  }, [data, color, prediction]);
 
-  // Actualizar solo los marcadores cuando cambien las entradas
+  // Actualizar marcadores: entradas + predicción IA
   useEffect(() => {
     if (!markersPluginRef.current || data.length === 0) return;
 
-    const markers: SeriesMarker<UTCTimestamp>[] = entries.map((e) => ({
-      time: findClosestTimeForPrice(data, e.price),
-      position: 'atPriceMiddle' as const,
-      price: e.price,
-      shape: e.side === 'buy' ? 'arrowUp' : 'arrowDown',
-      color: e.side === 'buy' ? '#22c55e' : '#ef4444',
-      text: `${e.price >= 1000 ? (e.price / 1000).toFixed(1) + 'k' : e.price} ${e.side === 'buy' ? 'Compra' : 'Venta'}`,
-    }));
+    const markers: SeriesMarker<UTCTimestamp>[] = [
+      ...entries.map((e) => ({
+        time: findClosestTimeForPrice(data, e.price),
+        position: 'atPriceMiddle' as const,
+        price: e.price,
+        shape: e.side === 'buy' ? 'arrowUp' as const : 'arrowDown' as const,
+        color: e.side === 'buy' ? '#22c55e' : '#ef4444',
+        text: `${e.price >= 1000 ? (e.price / 1000).toFixed(1) + 'k' : e.price} ${e.side === 'buy' ? 'Compra' : 'Venta'}`,
+      })),
+      ...(prediction
+        ? [
+            {
+              time: (prediction.predictedLine.length > 0
+                ? prediction.predictedLine[prediction.predictedLine.length - 1].time
+                : data[data.length - 1].time) as UTCTimestamp,
+              position: 'atPriceMiddle' as const,
+              price: prediction.targetPrice,
+              shape: 'circle' as const,
+              color: '#06b6d4',
+              text: `IA: ${prediction.targetPrice >= 1000 ? (prediction.targetPrice / 1000).toFixed(1) + 'k' : prediction.targetPrice.toFixed(2)}`,
+            },
+          ]
+        : []),
+    ];
     markersPluginRef.current.setMarkers(markers);
-  }, [entries, data]);
+  }, [entries, data, prediction]);
 
   if (error) {
     return (
@@ -189,8 +261,44 @@ export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
           >
             Añadir entrada
           </button>
+          <button
+            type="button"
+            onClick={fetchPrediction}
+            disabled={predictLoading}
+            className="rounded bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2 text-sm font-medium text-white hover:from-violet-700 hover:to-fuchsia-700 disabled:opacity-50"
+          >
+            {predictLoading ? 'Analizando…' : 'Predecir con IA'}
+          </button>
         </div>
       </div>
+
+      {predictError && (
+        <div className="rounded-lg bg-[#131722] p-4 ring-1 ring-red-500/50 text-red-400 text-sm">
+          {predictError}
+        </div>
+      )}
+
+      {prediction && (
+        <div className="rounded-lg bg-[#131722] p-4 ring-1 ring-[#334155]">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-medium text-[#06b6d4]">Predicción IA (GPT-4o)</p>
+            <button
+              type="button"
+              onClick={clearPrediction}
+              className="rounded p-1 text-[#787b86] hover:bg-[#334155] hover:text-[#d1d4dc]"
+              aria-label="Quitar predicción"
+            >
+              ×
+            </button>
+          </div>
+          <p className="mb-2 text-sm text-[#d1d4dc]">{prediction.reasoning}</p>
+          <div className="flex flex-wrap gap-2 text-xs text-[#787b86]">
+            <span>Objetivo: <strong className="text-[#06b6d4]">${formatPrice(prediction.targetPrice)}</strong></span>
+            <span>Dirección: <strong>{prediction.direction === 'up' ? '↑ Alcista' : prediction.direction === 'down' ? '↓ Bajista' : '→ Lateral'}</strong></span>
+            <span>Confianza: <strong>{prediction.confidence}</strong></span>
+          </div>
+        </div>
+      )}
 
       {entries.length > 0 && (
         <div className="rounded-lg bg-[#131722] p-4 ring-1 ring-[#334155]">
