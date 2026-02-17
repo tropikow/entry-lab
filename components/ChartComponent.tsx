@@ -93,6 +93,12 @@ export type Prediction = {
   reasoning: string;
   predictedLine: ChartPoint[];
   currentPrice: number;
+  recommendedSide: 'buy' | 'sell';
+  alternativeSuggestion: {
+    side: 'buy' | 'sell';
+    targetPrice: number;
+    confidence: string;
+  } | null;
 };
 
 type Props = {
@@ -339,9 +345,23 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
               position: 'atPriceMiddle' as const,
               price: prediction.targetPrice,
               shape: 'circle' as const,
-              color: '#06b6d4',
-              text: `IA: ${prediction.targetPrice >= 1000 ? (prediction.targetPrice / 1000).toFixed(1) + 'k' : prediction.targetPrice.toFixed(2)}`,
+              color: prediction.recommendedSide === 'buy' ? '#22c55e' : '#ef4444',
+              text: `IA: ${prediction.recommendedSide === 'buy' ? 'Compra' : 'Venta'} ${prediction.targetPrice >= 1000 ? (prediction.targetPrice / 1000).toFixed(1) + 'k' : prediction.targetPrice.toFixed(2)}`,
             },
+            ...(prediction.alternativeSuggestion
+              ? [
+                  {
+                    time: (prediction.predictedLine.length > 0
+                      ? prediction.predictedLine[prediction.predictedLine.length - 1].time
+                      : data[data.length - 1].time) as UTCTimestamp,
+                    position: 'atPriceMiddle' as const,
+                    price: prediction.alternativeSuggestion.targetPrice,
+                    shape: 'square' as const,
+                    color: '#f59e0b',
+                    text: `IA alt: ${prediction.alternativeSuggestion.side === 'buy' ? 'Compra' : 'Venta'} ${prediction.alternativeSuggestion.targetPrice >= 1000 ? (prediction.alternativeSuggestion.targetPrice / 1000).toFixed(1) + 'k' : prediction.alternativeSuggestion.targetPrice.toFixed(2)}`,
+                  },
+                ]
+              : []),
           ]
         : []),
     ];
@@ -451,11 +471,28 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
             </button>
           </div>
           <p className="mb-2 text-sm text-[#d1d4dc]">{prediction.reasoning}</p>
-          <div className="flex flex-wrap gap-2 text-xs text-[#787b86]">
-            <span>Objetivo: <strong className="text-[#06b6d4]">${formatPrice(prediction.targetPrice)}</strong></span>
-            <span>Dirección: <strong>{prediction.direction === 'up' ? '↑ Alcista' : prediction.direction === 'down' ? '↓ Bajista' : '→ Lateral'}</strong></span>
-            <span>Confianza: <strong>{prediction.confidence}</strong></span>
+          <div className="mb-2 rounded bg-[#1e222d] px-3 py-2">
+            <p className="text-xs text-[#787b86]">Entrada más confiable</p>
+            <p className="text-sm font-semibold">
+              {prediction.recommendedSide === 'buy' ? (
+                <span className="text-[#22c55e]">↑ Comprar en ${formatPrice(prediction.targetPrice)}</span>
+              ) : (
+                <span className="text-[#ef4444]">↓ Vender en ${formatPrice(prediction.targetPrice)}</span>
+              )}
+              <span className="ml-2 font-normal text-[#787b86]">(confianza {prediction.confidence})</span>
+            </p>
           </div>
+          {prediction.alternativeSuggestion && (
+            <p className="text-xs text-[#787b86]">
+              Otra opción:{' '}
+              {prediction.alternativeSuggestion.side === 'buy' ? (
+                <span className="text-[#22c55e]">Comprar en ${formatPrice(prediction.alternativeSuggestion.targetPrice)}</span>
+              ) : (
+                <span className="text-[#ef4444]">Vender en ${formatPrice(prediction.alternativeSuggestion.targetPrice)}</span>
+              )}
+              {' '}(confianza {prediction.alternativeSuggestion.confidence})
+            </p>
+          )}
         </div>
       )}
 

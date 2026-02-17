@@ -139,17 +139,22 @@ Precio actual (último cierre): ${lastCandle.close}
 Debes considerar en tu análisis: retrocesos de Fibonacci como soporte/resistencia, cruces y distancia a EMAs (9, 21, 50), patrones recurrentes mensuales, estructura de máximos y mínimos, y el contexto de que el mercado suele repetir ciclos. Deduce el potencial del próximo movimiento mensual.
 ${entriesContext}
 
-Responde ÚNICAMENTE con un JSON válido, sin texto adicional:
+Responde ÚNICAMENTE con un JSON válido, sin texto adicional. Debes dar AMBAS opciones (compra y venta); el usuario verá como recomendación principal la que tenga mayor confianza:
 {
-  "targetPrice": <número: precio objetivo para el próximo mes>,
-  "direction": "up" | "down" | "sideways",
-  "confidence": "low" | "medium" | "high",
+  "buySuggestion": {
+    "targetPrice": <número: precio sugerido para ENTRAR EN COMPRA (long)>,
+    "confidence": "low" | "medium" | "high"
+  },
+  "sellSuggestion": {
+    "targetPrice": <número: precio sugerido para ENTRAR EN VENTA (short)>,
+    "confidence": "low" | "medium" | "high"
+  },
   "reasoning": "<explicación breve en español citando Fibonacci, EMA o patrones recurrentes>",
   "predictedValues": [<valor1>, <valor2>, <valor3>, <valor4>, <valor5>]
 }
 
-predictedValues = 5 precios estimados para los próximos 5 MESES (tendencia mensual).
-targetPrice = precio más probable al que llegará en el próximo mes.`;
+predictedValues = 5 precios estimados para los próximos 5 MESES (trayectoria más probable).
+Indica en buySuggestion y sellSuggestion la confianza real de cada operación; la de mayor confianza se mostrará al usuario como recomendación principal.`;
 
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -181,12 +186,20 @@ targetPrice = precio más probable al que llegará en el próximo mes.`;
     }
 
     const parsed = JSON.parse(content) as {
-      targetPrice: number;
-      direction: string;
-      confidence: string;
-      reasoning: string;
+      buySuggestion?: { targetPrice: number; confidence: string };
+      sellSuggestion?: { targetPrice: number; confidence: string };
+      reasoning?: string;
       predictedValues?: number[];
     };
+
+    const buy = parsed.buySuggestion ?? { targetPrice: lastCandle.close, confidence: 'low' };
+    const sell = parsed.sellSuggestion ?? { targetPrice: lastCandle.close, confidence: 'low' };
+    const confLevel = (c: string) => (c === 'high' ? 3 : c === 'medium' ? 2 : 1);
+    const buyConf = confLevel(buy.confidence);
+    const sellConf = confLevel(sell.confidence);
+    const recommendedSide = buyConf >= sellConf ? 'buy' : 'sell';
+    const recommended = recommendedSide === 'buy' ? buy : sell;
+    const alternative = recommendedSide === 'buy' ? sell : buy;
 
     const lastTime = lastCandle.time;
     const predictedLine =
@@ -196,12 +209,18 @@ targetPrice = precio más probable al que llegará en el próximo mes.`;
       })) ?? [];
 
     return NextResponse.json({
-      targetPrice: parsed.targetPrice,
-      direction: parsed.direction,
-      confidence: parsed.confidence,
-      reasoning: parsed.reasoning,
+      targetPrice: recommended.targetPrice,
+      direction: recommendedSide === 'buy' ? 'up' : 'down',
+      confidence: recommended.confidence,
+      reasoning: parsed.reasoning ?? '',
       predictedLine,
       currentPrice: lastCandle.close,
+      recommendedSide,
+      alternativeSuggestion: {
+        side: (recommendedSide === 'buy' ? 'sell' : 'buy') as 'buy' | 'sell',
+        targetPrice: alternative.targetPrice,
+        confidence: alternative.confidence,
+      },
     });
   } catch (e) {
     console.error(e);
