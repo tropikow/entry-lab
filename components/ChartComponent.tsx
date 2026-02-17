@@ -38,6 +38,7 @@ function findClosestTimeForPrice(data: ChartPoint[], price: number): UTCTimestam
 
 export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const markersPluginRef = useRef<{ setMarkers: (m: SeriesMarker<UTCTimestamp>[]) => void } | null>(null);
   const [data, setData] = useState<ChartPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +92,7 @@ export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
     };
   }, [symbol]);
 
+  // Crear chart una sola vez cuando hay datos; no destruir al cambiar entries
   useEffect(() => {
     if (!chartContainerRef.current || data.length === 0) return;
 
@@ -109,6 +111,18 @@ export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
 
     const lineSeries = chart.addSeries(LineSeries, { color });
     lineSeries.setData(data);
+    markersPluginRef.current = createSeriesMarkers(lineSeries, []);
+    chart.timeScale().fitContent();
+
+    return () => {
+      markersPluginRef.current = null;
+      chart.remove();
+    };
+  }, [data, color]);
+
+  // Actualizar solo los marcadores cuando cambien las entradas
+  useEffect(() => {
+    if (!markersPluginRef.current || data.length === 0) return;
 
     const markers: SeriesMarker<UTCTimestamp>[] = entries.map((e) => ({
       time: findClosestTimeForPrice(data, e.price),
@@ -118,14 +132,8 @@ export default function ChartComponent({ symbol, color = '#2962ff' }: Props) {
       color: e.side === 'buy' ? '#22c55e' : '#ef4444',
       text: `${e.price >= 1000 ? (e.price / 1000).toFixed(1) + 'k' : e.price} ${e.side === 'buy' ? 'Compra' : 'Venta'}`,
     }));
-    createSeriesMarkers(lineSeries, markers);
-
-    chart.timeScale().fitContent();
-
-    return () => {
-      chart.remove();
-    };
-  }, [data, color, entries]);
+    markersPluginRef.current.setMarkers(markers);
+  }, [entries, data]);
 
   if (error) {
     return (
