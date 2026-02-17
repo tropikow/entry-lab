@@ -45,7 +45,14 @@ export async function POST(request: NextRequest) {
   let body: {
     symbol: string;
     interval: string;
-    userEntries?: { price: number; side: string; createdAt?: number; outcome: 'won' | 'lost' | null }[];
+    userEntries?: {
+      price: number;
+      side: string;
+      amount?: number;
+      createdAt?: number;
+      outcome: 'won' | 'lost' | null;
+      pnl?: number | null;
+    }[];
   };
   try {
     body = await request.json();
@@ -79,7 +86,9 @@ ${userEntries
     const fecha = e.createdAt
       ? new Date(e.createdAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })
       : 'fecha desconocida';
-    return `- Entrada ${i + 1}: ${e.side === 'buy' ? 'Compró (long)' : 'Vendió (short)'} a $${e.price} el ${fecha}. Resultado: ${e.outcome === 'won' ? 'GANÓ (acertó)' : e.outcome === 'lost' ? 'PERDIÓ' : 'neutral'}`;
+    const qty = e.amount && e.amount > 0 ? `, cantidad ${e.amount}` : '';
+    const pnl = e.pnl != null ? `, P&L ${e.pnl >= 0 ? '+' : ''}${e.pnl.toFixed(2)} USDT` : '';
+    return `- Entrada ${i + 1}: ${e.side === 'buy' ? 'Compró (long)' : 'Vendió (short)'} a $${e.price}${qty} el ${fecha}. Resultado: ${e.outcome === 'won' ? 'GANÓ' : e.outcome === 'lost' ? 'PERDIÓ' : 'neutral'}${pnl}`;
   })
   .join('\n')}
 Considera estos movimientos del usuario al predecir: patrones donde acertó o falló, zonas de precio frecuentes, etc.`

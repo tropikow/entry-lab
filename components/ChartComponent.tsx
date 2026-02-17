@@ -220,8 +220,10 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
     const userEntries = entries.map((e) => ({
       price: e.price,
       side: e.side,
+      amount: e.amount,
       createdAt: e.createdAt,
       outcome: computeOutcome(e, currentPrice),
+      pnl: computePnL(e, currentPrice),
     }));
     try {
       const res = await fetch('/api/crypto/predict', {
