@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { useLivePrice } from '@/contexts/LivePriceContext';
 import {
   createChart,
   LineSeries,
@@ -135,7 +136,8 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
   const [entries, setEntries] = useState<Entry[]>(() =>
     typeof window !== 'undefined' ? loadEntriesFromStorage(symbol) : []
   );
-  const [currentPrice, setCurrentPrice] = useState<number>(0);
+  const { btc, eth } = useLivePrice();
+  const currentPrice = symbol === 'BTCUSDT' ? btc : eth;
   const [priceInput, setPriceInput] = useState('');
   const [amountInput, setAmountInput] = useState('');
   const [sideInput, setSideInput] = useState<'buy' | 'sell'>('buy');
@@ -190,24 +192,6 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
   useEffect(() => {
     saveEntriesToStorage(symbol, entries);
   }, [entries, symbol]);
-
-  // Obtener precio actual para calcular ganó/perdió
-  useEffect(() => {
-    if (entries.length === 0) return;
-    const fetchPrice = async () => {
-      try {
-        const res = await fetch('/api/crypto/price');
-        const { btc, eth } = await res.json();
-        const price = symbol === 'BTCUSDT' ? parseFloat(btc) : parseFloat(eth);
-        if (Number.isFinite(price)) setCurrentPrice(price);
-      } catch {
-        // ignore
-      }
-    };
-    fetchPrice();
-    const interval = setInterval(fetchPrice, 15000);
-    return () => clearInterval(interval);
-  }, [entries.length, symbol]);
 
   const fetchPrediction = useCallback(async () => {
     setPredictLoading(true);

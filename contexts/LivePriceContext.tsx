@@ -2,9 +2,9 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -30,10 +30,25 @@ const LivePriceContext = createContext<LivePriceState | null>(null);
 
 export function LivePriceProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<LivePriceState>(initialState);
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const connect = useCallback(() => {
+  useEffect(() => {
     if (typeof window === 'undefined') return;
+
     setState((s) => ({ ...s, error: null }));
+
+    // Carga inicial para no mostrar 0 mientras llega el primer tick del WS
+    fetch('/api/crypto/price')
+      .then((res) => res.json())
+      .then((data: { btc: string; eth: string }) => {
+        setState((s) => ({
+          ...s,
+          btc: parseFloat(data.btc) || s.btc,
+          eth: parseFloat(data.eth) || s.eth,
+        }));
+      })
+      .catch(() => {});
 
     const ws = new WebSocket(BINANCE_WS_URL);
 
@@ -64,29 +79,22 @@ export function LivePriceProvider({ children }: { children: ReactNode }) {
     };
 
     ws.onerror = () => {
-      setState((s) => ({
-        ...s,
-        error: s.error ?? 'Error de conexión',
-      }));
+      setState((s) => ({ ...s, error: s.error ?? 'Error de conexión' }));
     };
 
     ws.onclose = () => {
       setState((s) => ({ ...s, connected: false }));
-      // Reconectar tras 3 segundos
-      setTimeout(connect, 3000);
+      reconnectTimerRef.current = setTimeout(() => setReconnectKey((k) => k + 1), 3000);
     };
 
     return () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       ws.close();
     };
-  }, []);
-
-  useEffect(() => {
-    const cleanup = connect();
-    return () => {
-      if (typeof cleanup === 'function') cleanup();
-    };
-  }, [connect]);
+  }, [reconnectKey]);
 
   return (
     <LivePriceContext.Provider value={state}>
