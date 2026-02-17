@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { useLivePrice } from '@/contexts/LivePriceContext';
+import { usePredictionAlert } from '@/contexts/PredictionAlertContext';
 import {
   createChart,
   LineSeries,
@@ -144,6 +145,7 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
   );
   const { btc, eth } = useLivePrice();
   const currentPrice = symbol === 'BTCUSDT' ? btc : eth;
+  const alertContext = usePredictionAlert();
   const [priceInput, setPriceInput] = useState('');
   const [amountInput, setAmountInput] = useState('');
   const [sideInput, setSideInput] = useState<'buy' | 'sell'>('buy');
@@ -229,7 +231,22 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
   const clearPrediction = useCallback(() => {
     setPrediction(null);
     setPredictError(null);
-  }, []);
+    alertContext?.setPredictionAlert(symbol === 'BTCUSDT' ? 'BTC' : 'ETH', null);
+  }, [alertContext, symbol]);
+
+  // Sincronizar predicción con el contexto de alerta (para borde dorado en tarjetas)
+  useEffect(() => {
+    if (!alertContext) return;
+    const key = symbol === 'BTCUSDT' ? 'BTC' : 'ETH';
+    if (prediction) {
+      alertContext.setPredictionAlert(key, {
+        targetPrice: prediction.targetPrice,
+        confidence: prediction.confidence,
+      });
+    } else {
+      alertContext.setPredictionAlert(key, null);
+    }
+  }, [alertContext, symbol, prediction]);
 
   const fetchPredictionRef = useRef(fetchPrediction);
   fetchPredictionRef.current = fetchPrediction;
