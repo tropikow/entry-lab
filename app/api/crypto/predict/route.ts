@@ -42,14 +42,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let body: { symbol: string; interval: string };
+  let body: {
+    symbol: string;
+    interval: string;
+    userEntries?: { price: number; side: string; createdAt?: number; outcome: 'won' | 'lost' | null }[];
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: 'Body inválido' }, { status: 400 });
   }
 
-  const { symbol = 'BTCUSDT', interval = '1d' } = body;
+  const { symbol = 'BTCUSDT', interval = '1d', userEntries = [] } = body;
   const validSymbols = ['BTCUSDT', 'ETHUSDT'];
   if (!validSymbols.includes(symbol)) {
     return NextResponse.json({ error: 'Símbolo inválido' }, { status: 400 });
@@ -64,10 +68,28 @@ export async function POST(request: NextRequest) {
     const lastCandle = klines[klines.length - 1];
     const periodSeconds = intervalToSeconds(interval);
 
+    const entriesContext =
+      userEntries.length > 0
+        ? `
+
+HISTORIAL DEL USUARIO (aprende de sus movimientos para mejorar tu análisis):
+El usuario tiene ${userEntries.length} entradas registradas. Cada entrada incluye cuándo se realizó (fecha/hora) y el resultado:
+${userEntries
+  .map((e, i) => {
+    const fecha = e.createdAt
+      ? new Date(e.createdAt).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })
+      : 'fecha desconocida';
+    return `- Entrada ${i + 1}: ${e.side === 'buy' ? 'Compró (long)' : 'Vendió (short)'} a $${e.price} el ${fecha}. Resultado: ${e.outcome === 'won' ? 'GANÓ (acertó)' : e.outcome === 'lost' ? 'PERDIÓ' : 'neutral'}`;
+  })
+  .join('\n')}
+Considera estos movimientos del usuario al predecir: patrones donde acertó o falló, zonas de precio frecuentes, etc.`
+        : '';
+
     const prompt = `Eres un analista técnico de criptomonedas. Analiza el siguiente historial de precios de cierre de ${asset} en gráfico ${intervalStr}.
 Últimos 30 precios de cierre (del más antiguo al más reciente): ${lastPrices.join(', ')}
 Precio actual: ${lastCandle.close}
 Rango último período: high ${lastCandle.high}, low ${lastCandle.low}
+${entriesContext}
 
 Responde ÚNICAMENTE con un JSON válido, sin texto adicional, con esta estructura exacta:
 {
@@ -80,7 +102,8 @@ Responde ÚNICAMENTE con un JSON válido, sin texto adicional, con esta estructu
 
 Donde predictedValues son 5 precios estimados para los próximos 5 períodos (para dibujar una línea de tendencia).
 targetPrice representa el punto más probable al que llegará el precio en el corto plazo.
-Sé conciso y fundamenta en patrones técnicos.`;
+Sé conciso y fundamenta en patrones técnicos.
+${userEntries.length > 0 ? 'Incluye en tu reasoning una breve mención de cómo el historial del usuario influye en tu predicción.' : ''}`;
 
     const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
