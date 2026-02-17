@@ -19,9 +19,12 @@ export async function GET(request: NextRequest) {
     if (!res.ok) throw new Error('Binance klines fetch failed');
     const raw: [number, string, string, string, string, string, number, ...unknown[]][] = await res.json();
 
-    const data = raw.map(([openTime, , , , close]) => ({
+    const data = raw.map(([openTime, open, high, low, close]) => ({
       time: Math.floor(openTime / 1000),
-      value: parseFloat(close),
+      open: parseFloat(open),
+      high: parseFloat(high),
+      low: parseFloat(low),
+      close: parseFloat(close),
     }));
 
     return NextResponse.json(data);

@@ -4,6 +4,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import {
   createChart,
   LineSeries,
+  CandlestickSeries,
   createSeriesMarkers,
   LineStyle,
   type UTCTimestamp,
@@ -11,6 +12,14 @@ import {
 } from 'lightweight-charts';
 
 type ChartPoint = { time: UTCTimestamp; value: number };
+
+type CandleData = {
+  time: UTCTimestamp;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+};
 
 export type Entry = {
   id: string;
@@ -91,21 +100,7 @@ type Props = {
   interval?: ChartInterval;
 };
 
-function findClosestTimeForPrice(data: ChartPoint[], price: number): UTCTimestamp {
-  if (data.length === 0) return 0 as UTCTimestamp;
-  let best = data[0];
-  let bestDiff = Math.abs(best.value - price);
-  for (let i = 1; i < data.length; i++) {
-    const diff = Math.abs(data[i].value - price);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      best = data[i];
-    }
-  }
-  return best.time;
-}
-
-function findClosestTimeForTimestamp(data: ChartPoint[], timestampMs: number): UTCTimestamp {
+function findClosestTimeForTimestamp(data: CandleData[], timestampMs: number): UTCTimestamp {
   if (data.length === 0) return 0 as UTCTimestamp;
   const ts = Math.floor(timestampMs / 1000);
   let best = data[0];
@@ -134,7 +129,7 @@ function formatEntryDate(createdAt: number): string {
 export default function ChartComponent({ symbol, color = '#2962ff', interval = '1d' }: Props) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const markersPluginRef = useRef<{ setMarkers: (m: SeriesMarker<UTCTimestamp>[]) => void } | null>(null);
-  const [data, setData] = useState<ChartPoint[]>([]);
+  const [data, setData] = useState<CandleData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>(() =>
@@ -255,8 +250,8 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
         if (!res.ok) throw new Error('Failed to load chart data');
         return res.json();
       })
-      .then((d: { time: number; value: number }[]) => {
-        if (!cancelled) setData(d as ChartPoint[]);
+      .then((d: { time: number; open: number; high: number; low: number; close: number }[]) => {
+        if (!cancelled) setData(d as CandleData[]);
       })
       .catch((e) => {
         if (!cancelled) setError(e.message ?? 'Error loading data');
@@ -286,15 +281,22 @@ export default function ChartComponent({ symbol, color = '#2962ff', interval = '
       },
     });
 
-    const lineSeries = chart.addSeries(LineSeries, { color });
-    lineSeries.setData(data);
-    markersPluginRef.current = createSeriesMarkers(lineSeries, []);
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      borderUpColor: '#22c55e',
+      borderDownColor: '#ef4444',
+      wickUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+    });
+    candleSeries.setData(data);
+    markersPluginRef.current = createSeriesMarkers(candleSeries, []);
 
-    // Línea de predicción IA: conecta último punto con la trayectoria predicha
+    // Línea de predicción IA: conecta último cierre con la trayectoria predicha
     if (prediction?.predictedLine?.length) {
-      const lastPoint = data[data.length - 1];
+      const lastCandle = data[data.length - 1];
       const predictionLineData: ChartPoint[] = [
-        { time: lastPoint.time, value: lastPoint.value },
+        { time: lastCandle.time, value: lastCandle.close },
         ...prediction.predictedLine.map((p) => ({ time: p.time as UTCTimestamp, value: p.value })),
       ];
       const predSeries = chart.addSeries(LineSeries, {
